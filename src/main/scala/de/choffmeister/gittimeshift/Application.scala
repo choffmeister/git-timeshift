@@ -1,6 +1,7 @@
 package de.choffmeister.gittimeshift
 
 import java.io._
+import java.util._
 
 import com.madgag.git.bfg.cleaner._
 import com.madgag.git.bfg.cleaner.protection.ProtectedObjectCensus
@@ -15,13 +16,15 @@ class Application {
       .findGitDir()
       .build()
 
+    val curfew = (t: Date) => !(t.getDay >= 1 && t.getDay <= 5 && t.getHours >= 8 && t.getHours < 18)
+    val timeshiftCleaner = new TimeshiftCommitNodeCleaner(curfew)
     val config = ObjectIdCleaner.Config(
       protectedObjectCensus = ProtectedObjectCensus(),
       objectIdSubstitutor = ObjectIdSubstitutor.OldIdsPublic,
-      commitNodeCleaners = Seq.empty,
-      treeEntryListCleaners = Seq.empty,
-      treeBlobsCleaners = Seq.empty,
-      treeSubtreesCleaners = Seq.empty,
+      commitNodeCleaners = timeshiftCleaner :: Nil,
+      treeEntryListCleaners = Nil,
+      treeBlobsCleaners = Nil,
+      treeSubtreesCleaners = Nil,
       objectChecker = None)
 
     RepoRewriter.rewrite(repo, config)
