@@ -5,6 +5,7 @@ import java.util._
 
 import com.madgag.git.bfg.cleaner._
 import com.madgag.git.bfg.cleaner.protection.ProtectedObjectCensus
+import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder
 
 class Application {
@@ -16,8 +17,8 @@ class Application {
       .findGitDir()
       .build()
 
-    val curfew = (t: Date) => !(t.getDay >= 1 && t.getDay <= 5 && t.getHours >= 8 && t.getHours < 18)
-    val timeshiftCleaner = new TimeshiftCommitNodeCleaner(curfew)
+    val allowed = (t: Date) ⇒ !(t.getDay >= 1 && t.getDay <= 5 && t.getHours >= 8 && t.getHours < 18)
+    val timeshiftCleaner = new TimeshiftCommitNodeCleaner(allowed, repo)
     val config = ObjectIdCleaner.Config(
       protectedObjectCensus = ProtectedObjectCensus(),
       objectIdSubstitutor = ObjectIdSubstitutor.OldIdsPublic,

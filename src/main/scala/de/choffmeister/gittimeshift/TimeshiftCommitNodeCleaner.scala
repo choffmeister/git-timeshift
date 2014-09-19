@@ -2,24 +2,37 @@ package de.choffmeister.gittimeshift
 
 import java.util.Date
 
-import com.madgag.git.bfg.cleaner.{Cleaner, CommitNodeCleaner}
+import com.madgag.git.bfg.cleaner.{ Cleaner, CommitNodeCleaner }
 import com.madgag.git.bfg.cleaner.CommitNodeCleaner.Kit
 import com.madgag.git.bfg.model.CommitNode
-import org.eclipse.jgit.lib.PersonIdent
+import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.lib.{ Repository, PersonIdent }
 
-class TimeshiftCommitNodeCleaner(curfew: Date => Boolean) extends CommitNodeCleaner {
+import scala.collection.JavaConversions._
+
+class TimeshiftCommitNodeCleaner(allowed: Date ⇒ Boolean, repo: Repository) extends CommitNodeCleaner {
   import de.choffmeister.gittimeshift.TimeshiftCommitNodeCleaner._
 
-  override def fixer(kit: Kit): Cleaner[CommitNode] = { commit =>
+  val timestampMap: Map[Date, Date] = {
+    // get all timestamps of all commits
+    val timestamps = new Git(repo).log.all.call().toList.flatMap(c ⇒ List(c.getAuthorIdent.getWhen, c.getCommitterIdent.getWhen))
+    // find blocks the timestamps are in and the need mapping
+    val mapping = timestamps.map { ts ⇒
+      val (out, in) = (findOuterBlock(allowed, ts), findInnerBlock(allowed, ts))
+      val ts2 = rescale(ts, out, in)
+      (ts, ts2, out, in)
+    }
+    // filter out mappings in blocks, that have no violating timestamps anyway (this makes this cleaning idempotent!!!)
+    val filtered = mapping.groupBy(_._3).filter(a ⇒ a._2.exists(b ⇒ !allowed(b._1))).toList
+    filtered.flatMap(_._2).map(x ⇒ x._1 -> x._2).toMap
+  }
+
+  timestampMap.toList.sortBy(_._2).foreach(println)
+
+  override def fixer(kit: Kit): Cleaner[CommitNode] = { commit ⇒
     val at = commit.author.getWhen
-    val (aout, ain) = (findOuterBlock(curfew, at), findInnerBlock(curfew, at))
-    val at2 = rescale(at, aout, ain)
-
     val ct = commit.committer.getWhen
-    val (cout, cin) = (findOuterBlock(curfew, ct), findInnerBlock(curfew, ct))
-    val ct2 = rescale(ct, cout, cin)
-
-    changeTimestamps(commit, at2, ct2)
+    changeTimestamps(commit, timestampMap.getOrElse(at, at), timestampMap.getOrElse(ct, ct))
   }
 
   private def changeTimestamps(commit: CommitNode, authorWhen: Date, committerWhen: Date): CommitNode = commit.copy(
@@ -29,7 +42,7 @@ class TimeshiftCommitNodeCleaner(curfew: Date => Boolean) extends CommitNodeClea
 }
 
 object TimeshiftCommitNodeCleaner {
-  type Curfew = Date => Boolean
+  type Curfew = Date ⇒ Boolean
   type Block = (Date, Date)
 
   def addHours(t: Date, hours: Int) = new Date(t.getTime + hours * 1000 * 60 * 60)
@@ -45,37 +58,37 @@ object TimeshiftCommitNodeCleaner {
   }
 
   def findAllowed(c: Curfew, t: Date, step: Int): Date = c(t) match {
-    case true => floorToHours(t)
-    case false => findAllowed(c, new Date(t.getTime + step * 60 * 60 * 1000), step)
+    case true ⇒ floorToHours(t)
+    case false ⇒ findAllowed(c, new Date(t.getTime + step * 60 * 60 * 1000), step)
   }
 
   def findDisallowed(c: Curfew, t: Date, step: Int): Date = c(t) match {
-    case false => floorToHours(t)
-    case true => findDisallowed(c, new Date(t.getTime + step * 60 * 60 * 1000), step)
+    case false ⇒ floorToHours(t)
+    case true ⇒ findDisallowed(c, new Date(t.getTime + step * 60 * 60 * 1000), step)
   }
 
   def findBlock(c: Curfew, t: Date, steps: Int): Block = steps match {
-    case 0 => c(t) match {
-      case true => (addHours(findDisallowed(c, t, -1), +1), findDisallowed(c, t, +1))
-      case false => (addHours(findAllowed(c, t, -1), +1), findAllowed(c, t, +1))
+    case 0 ⇒ c(t) match {
+      case true ⇒ (addHours(findDisallowed(c, t, -1), +1), findDisallowed(c, t, +1))
+      case false ⇒ (addHours(findAllowed(c, t, -1), +1), findAllowed(c, t, +1))
     }
-    case s if s < 0 => findBlock(c, addHours(findBlock(c, t, 0)._1, -1), steps + 1)
-    case s if s > 0 => findBlock(c, findBlock(c, t, 0)._2, steps - 1)
+    case s if s < 0 ⇒ findBlock(c, addHours(findBlock(c, t, 0)._1, -1), steps + 1)
+    case s if s > 0 ⇒ findBlock(c, findBlock(c, t, 0)._2, steps - 1)
   }
 
   def findOuterBlock(c: Curfew, t: Date): Block = c(t) match {
-    case true => (median(findBlock(c, t, -1)), median(findBlock(c, t, +1)))
-    case false => t.before(median(findBlock(c, t, 0))) match {
-      case true => (median(findBlock(c, t, -2)), median(findBlock(c, t, 0)))
-      case false => (median(findBlock(c, t, 0)), median(findBlock(c, t, +2)))
+    case true ⇒ (median(findBlock(c, t, -1)), median(findBlock(c, t, +1)))
+    case false ⇒ t.before(median(findBlock(c, t, 0))) match {
+      case true ⇒ (median(findBlock(c, t, -2)), median(findBlock(c, t, 0)))
+      case false ⇒ (median(findBlock(c, t, 0)), median(findBlock(c, t, +2)))
     }
   }
 
   def findInnerBlock(c: Curfew, t: Date): Block = c(t) match {
-    case true => (max(findBlock(c, t, -1)), min(findBlock(c, t, +1)))
-    case false => t.before(median(findBlock(c, t, 0))) match {
-      case true => (max(findBlock(c, t, -2)), min(findBlock(c, t, 0)))
-      case false => (max(findBlock(c, t, 0)), min(findBlock(c, t, +2)))
+    case true ⇒ (max(findBlock(c, t, -1)), min(findBlock(c, t, +1)))
+    case false ⇒ t.before(median(findBlock(c, t, 0))) match {
+      case true ⇒ (max(findBlock(c, t, -2)), min(findBlock(c, t, 0)))
+      case false ⇒ (max(findBlock(c, t, 0)), min(findBlock(c, t, +2)))
     }
   }
 }
