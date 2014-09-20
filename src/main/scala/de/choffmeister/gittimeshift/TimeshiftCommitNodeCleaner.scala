@@ -22,9 +22,12 @@ class TimeshiftCommitNodeCleaner(allowed: Date ⇒ Boolean, repo: Repository) ex
       val ts2 = rescale(ts, out, in)
       (ts, ts2, out, in)
     }
+    val grouped = mapping.groupBy(_._3)
     // filter out mappings in blocks, that have no violating timestamps anyway (this makes this cleaning idempotent!!!)
-    val filtered = mapping.groupBy(_._3).filter(a ⇒ a._2.exists(b ⇒ !allowed(b._1))).toList
-    filtered.flatMap(_._2).map(x ⇒ x._1 -> x._2).toMap
+    val filtered1 = grouped.filter(a ⇒ a._2.exists(b ⇒ !allowed(b._1))).toList
+    // filter out mappings in the current block
+    val filtered2 = filtered1.filter(_._1._2.before(new Date()))
+    filtered2.flatMap(_._2).map(x ⇒ x._1 -> x._2).toMap
   }
 
   timestampMap.toList.sortBy(_._2).foreach(println)
