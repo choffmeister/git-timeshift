@@ -21,7 +21,7 @@ class ApplicationSpec extends Specification {
         val app = new Application()
         app.run(Array(repoDir.toString))
       } catch {
-        case _: Throwable => ()
+        case _: Throwable ⇒ ()
       }
 
       // assert that afterwards all timestamps are ok
@@ -30,10 +30,10 @@ class ApplicationSpec extends Specification {
         .readEnvironment()
         .findGitDir()
         .build()
-      val timestamps = new Git(repo).log.all.call().toList.flatMap(c ⇒ List(c.getAuthorIdent.getWhen, c.getCommitterIdent.getWhen))
-      val curfew = (t: Date) ⇒ !(t.getDay >= 1 && t.getDay <= 5 && t.getHours >= 8 &&t.getHours < 18)
 
-      timestamps.forall(ts => !curfew(ts)) === true
+      val timestamps = new Git(repo).log.all.call().toList.flatMap(c ⇒ List(c.getAuthorIdent.getWhen, c.getCommitterIdent.getWhen))
+      val allowed = (t: Date) ⇒ !(t.getDay >= 1 && t.getDay <= 5 && t.getHours >= 8 && t.getHours < 18)
+      timestamps.forall(ts ⇒ allowed(ts)) === true
     }
   }
 }
