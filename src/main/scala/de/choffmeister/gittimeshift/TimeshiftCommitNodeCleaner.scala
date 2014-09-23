@@ -7,15 +7,29 @@ import com.madgag.git.bfg.cleaner.CommitNodeCleaner.Kit
 import com.madgag.git.bfg.model.CommitNode
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.lib.{ Repository, PersonIdent }
+import org.eclipse.jgit.revwalk.RevCommit
 
 import scala.collection.JavaConversions._
 
-class TimeshiftCommitNodeCleaner(allowed: Date ⇒ Boolean, repo: Repository) extends CommitNodeCleaner {
+class TimeshiftCommitNodeCleaner(allowed: Date ⇒ Boolean, repo: Repository, commitsToChange: Either[String, List[RevCommit]]) extends CommitNodeCleaner {
   import de.choffmeister.gittimeshift.TimeshiftCommitNodeCleaner._
+
+  val commits = commitsToChange match {
+    case Right(c) ⇒ c
+    case Left(expr) ⇒
+      val regex = """^([a-zA-Z0-9\-/_~]+)(\.\.([a-zA-Z0-9\-/_~]+))?$""".r
+      val range = regex.findFirstIn(expr) match {
+        case Some(regex(a, _, b)) if Option(b).isDefined ⇒ (repo.resolve(a), repo.resolve(b))
+        case Some(regex(a, _, b)) if Option(b).isEmpty ⇒ (repo.resolve(a), repo.resolve(a))
+        case _ ⇒ throw new Exception(expr)
+      }
+      println(range)
+      new Git(repo).log().addRange(range._1, range._2).call().toList
+  }
 
   val timestampMap: Map[Date, Date] = {
     // get all timestamps of all commits
-    val timestamps = new Git(repo).log.all.call().toList.flatMap(c ⇒ List(c.getAuthorIdent.getWhen, c.getCommitterIdent.getWhen))
+    val timestamps = commits.flatMap(c ⇒ List(c.getAuthorIdent.getWhen, c.getCommitterIdent.getWhen))
     // find blocks the timestamps are in and the need mapping
     val mapping = timestamps.map { ts ⇒
       val (out, in) = (findOuterBlock(allowed, ts), findInnerBlock(allowed, ts))
@@ -29,8 +43,6 @@ class TimeshiftCommitNodeCleaner(allowed: Date ⇒ Boolean, repo: Repository) ex
     val filtered2 = filtered1.filter(_._1._2.before(new Date()))
     filtered2.flatMap(_._2).map(x ⇒ x._1 -> x._2).toMap
   }
-
-  timestampMap.toList.sortBy(_._2).foreach(println)
 
   override def fixer(kit: Kit): Cleaner[CommitNode] = { commit ⇒
     val at = commit.author.getWhen
