@@ -14,16 +14,17 @@ import scala.collection.JavaConversions._
 class TimeshiftCommitNodeCleaner(allowed: Date ⇒ Boolean, repo: Repository, commitsToChange: Either[String, List[RevCommit]]) extends CommitNodeCleaner {
   import de.choffmeister.gittimeshift.TimeshiftCommitNodeCleaner._
 
-  val commits = commitsToChange match {
+  val commits: List[RevCommit] = commitsToChange match {
     case Right(c) ⇒ c
     case Left(expr) ⇒
       val regex = """^([a-zA-Z0-9\-/_~]+)(\.\.([a-zA-Z0-9\-/_~]+))?$""".r
-      val range = regex.findFirstIn(expr) match {
-        case Some(regex(a, _, b)) if Option(b).isDefined ⇒ (repo.resolve(a), repo.resolve(b))
-        case Some(regex(a, _, b)) if Option(b).isEmpty ⇒ (repo.resolve(a), repo.resolve(a))
+      regex.findFirstIn(expr) match {
+        case Some(regex(a, _, b)) if Option(b).isDefined ⇒
+          new Git(repo).log().addRange(repo.resolve(a), repo.resolve(b)).call().toList
+        case Some(regex(a, _, b)) if Option(b).isEmpty ⇒
+          new Git(repo).log().add(repo.resolve(a)).setMaxCount(1).call().toList
         case _ ⇒ throw new Exception(expr)
       }
-      new Git(repo).log().addRange(range._1, range._2).call().toList
   }
 
   val timestampMap: Map[Date, Date] = {
